@@ -1,0 +1,14 @@
+{
+  "name": "griffin",
+  "private": true,
+  "type": "module",
+  "description": "Policy co-signer for AI agent wallets on Solana. Your agent holds one key. Griffin holds the other.",
+  "scripts": {
+    "setup": "cd core && npm install",
+    "test": "node core/test.mjs",
+    "build": "node core/build.mjs",
+    "dev": "node --disable-warning=ExperimentalWarning worker/dev.mjs 8833",
+    "deploy": "cd worker && npx wrangler deploy",
+    "agent": "node agent/cli.mjs"
+  }
+}

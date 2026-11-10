@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRIFFIN · the second key on your agent's wallet</title>
+<meta name="description" content="Your AI agent holds one key. Griffin holds the other, and only signs moves inside the limits you set. Squads multisig on Solana, MCP and REST.">
+<meta property="og:title" content="GRIFFIN · the second key on your agent's wallet">
+<meta property="og:description" content="Your agent holds one key. Griffin holds the other.">
+<meta property="og:image" content="https://griffinguard.fun/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@griffindotfun">
+<meta name="twitter:image" content="https://griffinguard.fun/og-image.png">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--gules:#7a1b1b;--gules-d:#5c1212;--cream:#f4ead6;--paper:#faf4e8;--ink:#16110e;--muted:#6b5f55;--gold:#f2a531;--line:#e4d6bd;--pass:#2f6b45;--back:#9c2a1f}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 Manrope,system-ui,sans-serif}
+a{color:inherit}
+.mono{font-family:'IBM Plex Mono',monospace}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+h1,h2,h3{font-family:'Cormorant Garamond',serif;font-weight:700;line-height:1.05;margin:0}
+/* keep: battlement band */
+.keep{background:var(--gules);color:var(--cream);position:relative;padding-bottom:56px;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 28px),96% calc(100% - 28px),96% 100%,88% 100%,88% calc(100% - 28px),80% calc(100% - 28px),80% 100%,72% 100%,72% calc(100% - 28px),64% calc(100% - 28px),64% 100%,56% 100%,56% calc(100% - 28px),48% calc(100% - 28px),48% 100%,40% 100%,40% calc(100% - 28px),32% calc(100% - 28px),32% 100%,24% 100%,24% calc(100% - 28px),16% calc(100% - 28px),16% 100%,8% 100%,8% calc(100% - 28px),0 calc(100% - 28px))}
+nav{display:flex;align-items:center;gap:22px;padding:18px 0;font-size:14px}
+nav .brand{display:flex;align-items:center;gap:10px;font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:700;letter-spacing:.12em;text-decoration:none;margin-right:auto}
+nav .brand img{width:34px;height:34px;border-radius:6px}
+nav a{text-decoration:none;opacity:.85}
+nav a:hover{opacity:1}
+nav .cta{background:var(--gold);color:var(--ink);padding:8px 14px;border-radius:4px;font-weight:700;opacity:1}
+.hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:48px;align-items:center;padding:40px 0 30px}
+.hero h1{font-size:clamp(44px,6.4vw,84px)}
+.hero h1 em{font-style:normal;color:var(--gold)}
+.hero p.lead{font-size:19px;max-width:560px;opacity:.92;margin:22px 0 28px}
+.btns{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-block;padding:13px 20px;border-radius:4px;font-weight:700;text-decoration:none;border:2px solid var(--cream)}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:var(--ink)}
+.crest{position:relative;justify-self:center;width:min(380px,80vw)}
+.crest .shield{background:var(--cream);padding:14px;clip-path:polygon(0 0,100% 0,100% 62%,50% 100%,0 62%)}
+.crest .shield img{display:block;width:100%;clip-path:polygon(0 0,100% 0,100% 62%,50% 100%,0 62%)}
+.motto{margin-top:-6px;text-align:center;font-family:'Cormorant Garamond',serif;font-size:20px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
+.ca{margin-top:18px;font-size:13px;opacity:.85;word-break:break-all}
+section{padding:72px 0}
+.kicker{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--gules)}
+h2{font-size:clamp(34px,4.4vw,54px);margin:8px 0 18px}
+.sub{color:var(--muted);max-width:680px;margin:0 0 34px}
+/* three shields */
+.keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+.key{background:#fff;border:2px solid var(--ink);padding:26px 24px 64px;clip-path:polygon(0 0,100% 0,100% 78%,50% 100%,0 78%)}
+.key .tag{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+.key h3{font-size:32px;margin:6px 0 10px}
+.key ul{margin:0;padding-left:18px;color:var(--muted);font-size:15px}
+.key.g{background:var(--gules);color:var(--cream);border-color:var(--gules)}
+.key.g ul{color:var(--cream);opacity:.9}
+.flow{margin-top:34px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:13px}
+.flow span{background:var(--cream);border:1px solid var(--line);padding:8px 12px;border-radius:3px}
+.flow b{color:var(--gules)}
+/* the gate */
+.gate{background:var(--ink);color:var(--cream)}
+.gate .kicker{color:var(--gold)}
+.gate .sub{color:#b9ab98}
+.lanes{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(0,1fr);gap:18px}
+.portcullis{background:repeating-linear-gradient(0deg,transparent 0 22px,#3a2f28 22px 26px),repeating-linear-gradient(90deg,#3a2f28 0 4px,transparent 4px 15px);border-radius:2px}
+.lane h3{font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.2em;font-weight:500;margin-bottom:12px;display:flex;justify-content:space-between}
+.lane.p h3{color:#8fd1a6}.lane.b h3{color:#f08c7c}
+.move{background:#221b17;border-left:4px solid var(--pass);padding:12px 14px;margin-bottom:10px;font-size:14px}
+.lane.b .move{border-color:#d0503d}
+.move .top{display:flex;justify-content:space-between;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#b9ab98}
+.move .why{margin-top:4px}
+.empty{color:#8a7d70;font-size:14px;padding:12px 0}
+.tally{display:flex;gap:30px;margin:0 0 26px;font-family:'IBM Plex Mono',monospace;font-size:14px}
+.tally b{font-size:28px;font-family:'Cormorant Garamond',serif;color:var(--gold);margin-right:6px}
+/* charter */
+.charter{background:var(--cream);border:2px solid var(--ink);padding:40px clamp(18px,4vw,56px);position:relative}
+.charter ol{list-style:none;margin:0;padding:0;counter-reset:art;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 40px}
+.charter li{counter-increment:art;padding-left:58px;position:relative}
+.charter li::before{content:counter(art,upper-roman);position:absolute;left:0;top:0;font-family:'Cormorant Garamond',serif;font-weight:700;font-size:30px;color:var(--gules);width:48px;text-align:right}
+.charter li b{display:block;font-size:17px}
+.charter li span{color:var(--muted);font-size:15px}
+.seal{position:absolute;right:-18px;bottom:-26px;width:92px;height:92px;border-radius:50%;background:var(--gules);display:grid;place-items:center;border:4px solid var(--paper)}
+.seal img{width:62px;border-radius:50%}
+/* agents */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}
+pre{background:var(--ink);color:#f0e4cc;padding:18px;border-radius:4px;overflow:auto;font:13px/1.55 'IBM Plex Mono',monospace;margin:0}
+.steps{margin:0;padding-left:20px}
+.steps li{margin-bottom:10px}
+.limits{border-top:2px solid var(--ink)}
+.limits ul{padding-left:20px;color:var(--muted);max-width:820px}
+.limits li{margin-bottom:8px}
+.token{background:var(--gules);color:var(--cream)}
+.token .kicker{color:var(--gold)}
+.token .sub{color:var(--cream);opacity:.85}
+footer{padding:28px 0 40px;font-size:14px;color:var(--muted);display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr}.crest{order:-1;width:min(240px,64vw)}
+  .keys,.cols,.charter ol{grid-template-columns:1fr}
+  .key{padding-bottom:56px}
+  .lanes{grid-template-columns:1fr}.portcullis{display:none}
+  nav a:not(.brand):not(.cta){display:none}
+  .seal{right:10px}
+  .motto{font-size:16px;letter-spacing:.12em}
+}
+</style>
+</head>
+<body>
+<header class="keep">
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="/"><img src="/logo.png" alt="">GRIFFIN</a>
+      <a href="#keys">How</a><a href="#gate">The gate</a><a href="#charter">Rules</a><a href="#agents">Agents</a><a href="#token">$GRIFFIN</a>
+      <a class="x" href="#" data-x target="_blank" rel="noopener">X</a>
+      <a class="cta" href="/app/">Open app</a>
+    </nav>
+    <div class="hero">
+      <div>
+        <h1>Your agent holds one key.<br><em>Griffin holds the other.</em></h1>
+        <p class="lead">An AI agent with a hot wallet is one bad prompt away from empty. Put its funds in a Squads wallet that needs two votes. The agent casts one. Griffin casts the second only when the move fits the limits you signed.</p>
+        <div class="btns"><a class="btn gold" href="/app/">Guard an agent wallet</a><a class="btn" href="#agents">Agent setup</a></div>
+        <div class="ca mono" data-ca hidden></div>
+      </div>
+      <div class="crest"><div class="shield"><img src="/logo.png" alt="Griffin"></div><div class="motto">Nothing leaves unseen</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="keys">
+  <div class="wrap">
+    <div class="kicker">Three keys, two votes</div>
+    <h2>The agent can ask. It can't take.</h2>
+    <p class="sub">Every Griffin wallet is a plain Squads v4 multisig on Solana. Nothing custom holds your funds, and you can read every member and rule on chain.</p>
+    <div class="keys">
+      <div class="key"><div class="tag">Key 1 · you</div><h3>Owner</h3><ul><li>Signs the policy</li><li>Swaps the agent key in one transaction</li><li>Can dismiss Griffin alone, any time</li><li>Your own moves always pass</li></ul></div>
+      <div class="key"><div class="tag">Key 2 · your bot</div><h3>Agent</h3><ul><li>Lives on the agent's machine</li><li>Proposes moves and votes for them</li><li>One vote is never enough</li><li>A leaked agent key can't drain the wallet</li></ul></div>
+      <div class="key g"><div class="tag">Key 3 · the guard</div><h3>Griffin</h3><ul><li>Can only vote, can't propose</li><li>Simulates each move first</li><li>Votes yes inside the policy</li><li>Says no, with reasons, outside it</li></ul></div>
+    </div>
+    <div class="flow"><span>agent proposes</span>→<span>Griffin simulates</span>→<span>checks the policy</span>→<span><b>PASSED</b> second vote + execute</span>or<span><b>TURNED BACK</b> reasons</span></div>
+  </div>
+</section>
+
+<section id="gate" class="gate">
+  <div class="wrap">
+    <div class="kicker">Live</div>
+    <h2>The gate</h2>
+    <p class="sub">Every move Griffin judged, as it happens. Wallets are shortened. Nothing here is a payment from us.</p>
+    <div class="tally"><span><b data-n="passed">0</b>passed</span><span><b data-n="turnedBack">0</b>turned back</span><span><b data-n="wallets">0</b>guarded wallets</span></div>
+    <div class="lanes">
+      <div class="lane p"><h3><span>PASSED</span><span>went through</span></h3><div data-lane="passed"><div class="empty">Waiting for the first move…</div></div></div>
+      <div class="portcullis" aria-hidden="true"></div>
+      <div class="lane b"><h3><span>TURNED BACK</span><span>stopped</span></h3><div data-lane="turned back"><div class="empty">Nothing stopped yet.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="charter">
+  <div class="wrap">
+    <div class="kicker">The policy</div>
+    <h2>What Griffin checks</h2>
+    <p class="sub">You set the numbers and sign them with the owner key. Griffin reads the move from chain, runs it in a simulation, then holds it to these articles.</p>
+    <div class="charter">
+      <ol>
+        <li><b>SOL per move</b><span>The most one move may take out, counted from the simulation, wrapped SOL included.</span></li>
+        <li><b>SOL per day</b><span>A rolling 24 hours of everything Griffin let through.</span></li>
+        <li><b>Recipients</b><span>Plain SOL or token transfers only reach wallets on your list.</span></li>
+        <li><b>Programs</b><span>System, token, ATA, memo and Jupiter by default. Anything else you add by address.</span></li>
+        <li><b>No spenders</b><span>Approvals, authority changes and closing accounts into another wallet are always turned back.</span></li>
+        <li><b>Something back</b><span>A swap that pays out and returns nothing to the wallet is turned back.</span></li>
+        <li><b>Token limits</b><span>Per move and per day caps for any token you name, a buy list if you want one.</span></li>
+        <li><b>Your moves</b><span>Moves the owner key proposes pass without a check. It's your wallet.</span></li>
+      </ol>
+      <div class="seal"><img src="/logo.png" alt=""></div>
+    </div>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap">
+    <div class="kicker">For agents</div>
+    <h2>Give your bot the wallet, not the vault</h2>
+    <div class="cols">
+      <div>
+        <ol class="steps">
+          <li>Open the <a href="/app/">app</a>, connect your wallet, paste the agent's public key, create.</li>
+          <li>Sign a policy. Until you do, every agent move is turned back.</li>
+          <li>Fund the vault, and give the agent key a little SOL for fees and rent.</li>
+          <li>Run the Griffin MCP server next to your agent. It proposes, asks Griffin and executes.</li>
+        </ol>
+        <p class="sub" style="margin-top:18px">Tools: <span class="mono">griffin_status</span>, <span class="mono">griffin_send_sol</span>, <span class="mono">griffin_send_token</span>, <span class="mono">griffin_swap</span>. Hosted read-only MCP at <span class="mono" data-origin>/mcp</span>: <span class="mono">griffin_check</span>, <span class="mono">griffin_policy</span>.</p>
+      </div>
+<pre>{
+  "mcpServers": {
+    "griffin": {
+      "command": "node",
+      "args": ["griffin/agent/cli.mjs", "mcp"],
+      "env": {
+        "GRIFFIN_AGENT_KEY": "~/.griffin/agent.json",
+        "GRIFFIN_WALLET": "&lt;wallet from the app&gt;",
+        "SOL_RPC_URL": "&lt;your RPC&gt;"
+      }
+    }
+  }
+}
+
+# or by hand
+POST /v1/guard { "multisig": "…", "index": 7 }
+→ { "verdict": "passed", "transaction": "base64…" }</pre>
+    </div>
+  </div>
+</section>
+
+<section class="limits">
+  <div class="wrap">
+    <div class="kicker">Read this</div>
+    <h2>Honest limits</h2>
+    <ul>
+      <li>Griffin is a server key. If it goes down, agent moves stop, your funds don't: the owner dismisses Griffin and signs alone.</li>
+      <li>The hard wall is the SOL limits. Inside them, a clever route through an allowed program could still lose value. Keep limits to what you'd accept losing in a day.</li>
+      <li>Each agent move opens a proposal that costs about 0.004 SOL in rent from the agent key. A passed move closes it and the rent goes back to the vault.</li>
+      <li>Large Jupiter routes may not fit one Solana transaction through Squads. The agent kit asks for compact routes.</li>
+      <li>Griffin has not been audited. Start small.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="token" class="token">
+  <div class="wrap">
+    <div class="kicker">$GRIFFIN</div>
+    <h2>The token</h2>
+    <p class="sub">Guarding a wallet is free. $GRIFFIN is the project's token on pump.fun. Creator fees pay for the Griffin server, RPC and an audit.</p>
+    <div class="ca mono" data-ca-big>Contract address comes at launch.</div>
+  </div>
+</section>
+
+<div class="wrap"><footer><span>GRIFFIN · a second key for agent wallets on Solana · not financial advice</span><span><a href="/app/">App</a> · <a href="#agents">Agents</a> · <a href="#" data-x target="_blank" rel="noopener">X</a></span></footer></div>
+
+<script>
+(() => {
+  const CONFIG = { contract: '', x: 'https://x.com/griffindotfun' };
+  const short = (k) => `${String(k).slice(0, 4)}…${String(k).slice(-4)}`;
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const sol = (l) => { const n = BigInt(l || 0); const w = n / 1000000000n; const p = (n % 1000000000n).toString().padStart(9, '0').replace(/0+$/, ''); return p ? `${w}.${p}` : `${w}`; };
+  const ago = (t) => { const s = Math.max(1, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
+  document.querySelectorAll('[data-x]').forEach((a) => { if (CONFIG.x) a.href = CONFIG.x; else a.hidden = true; });
+  document.querySelectorAll('[data-origin]').forEach((e) => { e.textContent = `${location.origin}/mcp`; });
+  if (CONFIG.contract) {
+    const ca = document.querySelector('[data-ca]'); ca.hidden = false; ca.textContent = `CA ${CONFIG.contract}`;
+    document.querySelector('[data-ca-big]').textContent = CONFIG.contract;
+  }
+  async function load() {
+    try {
+      const [feed, stats] = await Promise.all([fetch('/v1/feed?limit=40').then((r) => r.json()), fetch('/v1/stats').then((r) => r.json())]);
+      for (const k of ['passed', 'turnedBack', 'wallets']) document.querySelector(`[data-n="${k}"]`).textContent = stats[k] ?? 0;
+      for (const lane of ['passed', 'turned back']) {
+        const rows = feed.verdicts.filter((v) => v.verdict === lane).slice(0, 8);
+        if (!rows.length) continue;
+        document.querySelector(`[data-lane="${lane}"]`).innerHTML = rows.map((v) => `<div class="move"><div class="top"><span>${short(v.multisig)} #${v.index}</span><span>${v.solOut !== '0' ? `${sol(v.solOut)} SOL · ` : ''}${ago(v.at)} ago</span></div><div class="why">${esc(v.reasons[0] || '')}${v.reasons.length > 1 ? ` <span style="opacity:.6">+${v.reasons.length - 1} more</span>` : ''}</div></div>`).join('');
+      }
+    } catch { /* the gate stays on its placeholder */ }
+  }
+  load();
+  setInterval(load, 20000);
+})();
+</script>
+</body>
+</html>

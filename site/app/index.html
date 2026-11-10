@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRIFFIN · app</title>
+<meta property="og:title" content="GRIFFIN · guard an agent wallet">
+<meta property="og:image" content="https://griffinguard.fun/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://griffinguard.fun/og-image.png">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--gules:#7a1b1b;--cream:#f4ead6;--paper:#faf4e8;--ink:#16110e;--muted:#6b5f55;--gold:#f2a531;--line:#e4d6bd;--pass:#2f6b45;--back:#9c2a1f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 Manrope,system-ui,sans-serif}
+.mono{font-family:'IBM Plex Mono',monospace;word-break:break-all}
+.small{font-size:13px}.muted{color:var(--muted)}
+.top{background:var(--gules);color:var(--cream);display:flex;align-items:center;gap:12px;padding:12px 20px}
+.top a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:10px;font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:700;letter-spacing:.12em}
+.top img{width:30px;height:30px;border-radius:5px}
+.top span{margin-left:auto;font-size:13px;opacity:.8}
+#root{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:calc(100vh - 54px)}
+aside{background:var(--cream);border-right:2px solid var(--ink);padding:18px;display:flex;flex-direction:column;gap:10px}
+aside .who{min-height:40px}
+.ring{display:flex;flex-direction:column;gap:6px}
+main{padding:24px clamp(16px,3vw,40px);max-width:900px}
+h2{font-family:'Cormorant Garamond',serif;font-size:28px;margin:0 0 10px}
+.card{background:#fff;border:2px solid var(--ink);padding:20px 22px;margin-bottom:18px}
+label{display:block;font-weight:500;margin:10px 0 0}
+input,textarea{display:block;width:100%;margin-top:4px;padding:10px 12px;border:1.5px solid #cbbba0;border-radius:3px;font:14px 'IBM Plex Mono',monospace;background:var(--paper)}
+button{font:700 14px Manrope,sans-serif;padding:10px 16px;border-radius:3px;border:2px solid var(--ink);background:var(--paper);cursor:pointer;margin-top:12px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.gold{background:var(--gold);border-color:var(--gold)}
+button.ghost{background:transparent}
+button.danger{background:var(--back);border-color:var(--back);color:#fff}
+button.side{margin:0;text-align:left;background:transparent;border-color:transparent}
+button.side.on{background:#fff;border-color:var(--ink)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}
+.row button{margin-top:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.facts{display:grid;grid-template-columns:200px minmax(0,1fr);gap:6px 14px;margin:12px 0 0}
+.facts dt{color:var(--muted)}.facts dd{margin:0}
+.warn{background:#fbe3dc;border-left:4px solid var(--back);padding:8px 12px}
+.okline{background:#e3f0e6;border-left:4px solid var(--pass);padding:8px 12px}
+.busy,.err,.note{padding:10px 14px;margin-bottom:14px;border-left:4px solid}
+.busy{background:#fff6e2;border-color:var(--gold)}.err{background:#fbe3dc;border-color:var(--back)}.note{background:#e3f0e6;border-color:var(--pass)}
+.verdicts{width:100%;border-collapse:collapse}
+.verdicts td{padding:8px 6px;border-top:1px solid var(--line);vertical-align:top}
+.verdicts tr.ok b{color:var(--pass)}.verdicts tr.no b{color:var(--back)}
+pre.policy{background:var(--paper);padding:12px;overflow:auto;font-size:12px}
+hr{border:0;border-top:1px solid var(--line);margin:18px 0}
+@media (max-width:760px){#root{grid-template-columns:1fr}aside{border-right:0;border-bottom:2px solid var(--ink)}.grid2,.facts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="top"><a href="/"><img src="/logo.png" alt="">GRIFFIN</a><span>Solana mainnet</span></div>
+<div id="root"></div>
+<script src="/app/app.js"></script>
+</body>
+</html>

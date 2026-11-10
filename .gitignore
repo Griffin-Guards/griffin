@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+dist/
+.dev.vars
+.env
+test/.live-keys.json
+test/.live-state.json
+*.db
