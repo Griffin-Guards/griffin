@@ -1,120 +1,70 @@
-# GRIFFIN
+# GRIFFIN on Robinhood Chain
 
 Your agent holds one key. Griffin holds the other.
 
-An AI agent that can spend needs a wallet, and a wallet with one hot key does whatever the agent is talked into. GRIFFIN gives the agent half a wallet. Funds sit in a [Squads v4](https://squads.so) multisig that needs 2 of 3 votes. The agent proposes and votes once. Griffin, a co-signer, simulates the move and adds the second vote only when the move fits the charter you signed. You keep the third key and the crown.
+A policy guard for AI agent wallets on Robinhood Chain. The agent's funds sit in a [Safe](https://safe.global) (v1.4.1, already on Robinhood Chain). The owner stays the Safe's only owner. The agent is not an owner: it can only spend through **GriffinModule**, and only inside the charter the Safe wrote on chain, with Griffin's signature on every move.
 
-- Site: https://griffinguard.fun
-- X: https://x.com/griffindotfun
-- API: https://griffinguard.fun/v1
+## Who holds what
 
-## The three keys
-
-| Key | Squads role | What it does |
-|---|---|---|
-| **Owner** (you) | full member, config authority | Signs the charter. Swaps the agent key or dismisses Griffin alone, in one transaction, with no vote. Owner moves pass without a check. |
-| **Agent** | full member | Proposes moves and votes for them. One vote is never enough. |
-| **Griffin** | vote only | Votes on agent moves inside the charter. Can never propose or execute, so it can never move funds by itself. |
-
-Threshold 2, no time lock. The vault is the rent collector, so the rent of closed proposals goes back to your wallet.
-
-## A move, end to end
-
-1. The agent sends `vaultTransactionCreate` + `proposalCreate` + its own `proposalApprove`.
-2. It calls `POST /v1/guard { multisig, index }`.
-3. Griffin reads the proposal, then simulates `[griffin approve, execute]` and reads every writable account before and after.
-4. The move is judged against the owner-signed policy.
-5. **PASSED**: Griffin returns a release transaction (its vote, execute, close accounts) signed by Griffin, with the agent as fee payer. The agent signs and sends it.
-   **TURNED BACK**: the reasons, and nothing moves. The proposal stays at 1 of 2.
-
-## The charter
-
-The owner signs this message in the wallet (`signMessage`, free, nothing moves):
-
-```
-GRIFFIN policy
-wallet: <multisig>
-hash: <sha256 of the policy>
-nonce: <ms timestamp>
-```
-
-Only the multisig's config authority can set it, so an agent can't loosen its own leash.
-
-| Field | Meaning |
-|---|---|
-| `solPerTx`, `solPerDay` | lamports, per move and per rolling 24 h of passed moves |
-| `tokens` | `{ mint: { perTx, perDay } }` in base units |
-| `recipients` | wallets the agent may pay |
-| `programs` | extra programs on top of the base list |
-| `buyOnly` | mints a swap may end in |
-
-Base programs: System, Token, Token-2022, Associated Token, Compute Budget, Memo, Jupiter v6 (`JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`).
-
-Always turned back, whatever the charter says:
-- `approve` / `approveChecked` (letting someone else spend the tokens)
-- `setAuthority`, and a token account closed into another wallet
-- system calls other than a plain transfer
-- a transfer to anyone not on the recipient list (SOL into the wallet's own wSOL account counts as the wallet)
-- a payout with nothing coming back
-- a simulated result where a delegate, an owner or a close authority changes
-- a move that fails in simulation
-
-## Agents
-
-`agent/` runs next to the agent and keeps the agent key local.
-
-```bash
-npm run setup
-export GRIFFIN_AGENT_KEY=./agent-key.json   # keypair JSON or base58 secret
-export GRIFFIN_WALLET=<multisig address>
-export SOL_RPC_URL=<your mainnet RPC>
-node agent/cli.mjs status
-node agent/cli.mjs send <to> 0.05
-node agent/cli.mjs swap So11111111111111111111111111111111111111112 EPjFWdd5AufqSSqeM2qq1xzybapC8G4wGGkEZwyTDt1v 1000000 100
-node agent/cli.mjs mcp                       # stdio MCP server
-```
-
-MCP tools: `griffin_status`, `griffin_send_sol`, `griffin_send_token`, `griffin_swap`. A swap asks Jupiter again without any DEX whose program would sit outside the list, so routes come back in a shape Griffin can pass.
-
-The worker also serves a read-only MCP at `POST /mcp` with `griffin_check` and `griffin_policy`.
-
-## API
+The charter is **on chain**, in the module, so the limits hold even if Griffin's server or key is compromised. Griffin adds a simulation of each move and its EIP-712 signature on top.
 
 | | |
 |---|---|
-| `GET /v1/griffin` | Griffin's vote key and the base program list |
-| `GET /v1/wallet/:multisig` | members, whether Griffin can guard it, the policy, recent verdicts |
-| `POST /v1/policy` | `{ multisig, policy, nonce, signature }` signed by the owner |
-| `POST /v1/guard` | `{ multisig, index, submit? }` → verdict, plus the release transaction when passed |
-| `GET /v1/feed`, `GET /v1/stats` | the public gate: latest verdicts and counts |
+| Owner | the Safe's owner. Writes the charter, swaps the agent key, removes Griffin or disables the module, all with ordinary Safe transactions and no one else's vote. |
+| Agent | a plain key. Calls `GriffinModule.execute(safe, to, value, data, deadline, signature)`. |
+| Griffin | signs `Move(safe, to, value, dataHash, nonce, deadline)` after it simulates the move. Can never move funds itself. |
 
-`submit: true` is for owner moves from a browser wallet: Griffin sends its own vote, because wallets such as Phantom add instructions to a transaction and that voids a signature made in advance.
+## The charter (enforced by the module)
 
-## Run your own Griffin
+- **ETH per move** and **ETH per UTC day**.
+- **Recipients**: plain ETH sends and token `transfer`s only reach these.
+- **Tokens** with a per-move and per-day limit. On a listed token only `transfer` (to a recipient) and `approve` (of a listed contract) are allowed; approvals count against the limit.
+- **Targets**: contracts the agent may call with data (a DEX router, for example) and the only spenders it may approve.
+- Never: a call to the Safe itself or to the module (that would run as the owner), delegatecall, a stale nonce, an expired or edited move.
+
+`setCharter` replaces the whole charter: older recipients, tokens and targets stop counting. The full charter is in the `CharterSet` event, so anyone can read what a Safe allows.
+
+Griffin also turns back a move that fails in simulation, or a call into a contract that takes ETH or tokens out of the Safe and returns nothing.
+
+## Layout
+
+| | |
+|---|---|
+| `contracts/GriffinModule.sol` | the module (6.5 KB runtime, no owner, no admin) |
+| `contracts/GriffinSim.sol` | never deployed: placed by an `eth_call` state override and marked as a module, it runs a move through the Safe and reports the balance changes |
+| `contracts/test.mjs` | 45 checks on a Hardhat fork with the real Safe singleton and factory |
+| `contracts/deploy.html`, `deploy-server.mjs` | one-button deploy from a browser wallet; writes `deployed.json` |
+| `core/griffin-rh.mjs` | charter reader, rule mirror (for reasons in words), simulation, verdict, EIP-712 signing, Safe setup calldata |
+| `worker/` | the co-signer API: `/v1/griffin`, `/v1/safe/:safe`, `POST /v1/guard`, `/v1/feed`, `/v1/stats`, `POST /mcp` |
+| `agent/` | CLI and stdio MCP for the agent: `griffin_status`, `griffin_send_eth`, `griffin_send_token`, `griffin_call` |
+| `app-src/` | the app at /app/, bundled by `npm run build` into `site/app/app.js` |
+| `test/e2e.mjs` | 22 checks: Safe made with the core's setup calldata, the worker in process, the agent kit sending real moves |
+
+- Site: https://griffinguard.fun
+- X: https://x.com/griffin_rbh
+- GriffinModule: [`0x991948aCCf7C5d76e21c189136A0B19D7BBC7527`](https://repo.sourcify.dev/4663/0x991948aCCf7C5d76e21c189136A0B19D7BBC7527) (Sourcify exact match)
+
+## Run the tests
 
 ```bash
-npm run setup && npm test          # 18 offline tests of the policy engine
-npm run build                      # bundles app-src into site/app/app.js
-cd worker
-npx wrangler d1 create griffin     # paste the id into wrangler.toml
-npx wrangler d1 execute griffin --remote --file schema.sql
-npx wrangler secret put GRIFFIN_SECRET   # base58 secret key of Griffin's vote key
-npx wrangler secret put SOL_RPC_URL      # a mainnet RPC that accepts Cloudflare IPs
-npx wrangler deploy
+npm install
+cd contracts && node compile.mjs
+npx hardhat node --config hardhat.config.cjs --port 8547   # a fork of Robinhood Chain; restart it if it gets old
+node test.mjs
+cd .. && node test/e2e.mjs
 ```
 
-Fund Griffin's key with a little SOL: it pays the fee when it sends its own vote for owner moves.
+The public RPC keeps only recent state, so a fork older than a few thousand blocks starts failing with "historical state is not available".
 
-Locally, `npm run dev` runs the worker on Node with SQLite in place of D1 (put `GRIFFIN_SECRET` in `worker/.dev.vars`). `test/live-check.mjs` is the mainnet run with throwaway keys from `test/.live-keys.json`: create a wallet, sign a charter, pay a listed friend, swap through Jupiter, try a stranger, the limits and an `approve`, then dismiss Griffin and send everything back.
+## Deploy
 
-## Limits, honestly
+1. `cd contracts && node deploy-server.mjs` and press the button at http://localhost:47231 with a wallet on Robinhood Chain. The address and block land in `deployed.json`.
+2. Worker: `npx wrangler d1 create griffin-rh`, paste the id, `npx wrangler d1 execute griffin-rh --remote --file schema.sql`, set `MODULE` and `MODULE_FROM_BLOCK`, then `wrangler secret put GRIFFIN_KEY` and `RH_RPC_URL`, and `npx wrangler deploy`.
+3. A Safe for an agent: `SafeProxyFactory.createProxyWithNonce(singletonL2, setupCalldata({...}), salt)`. `setupCalldata` in the core makes a 1-of-1 Safe for the owner that enables the module and writes the first charter in the same transaction. An existing Safe enables the module and calls `setCharter` with its own transaction.
 
-- Griffin's key lives on a server. If it goes down, agent moves wait, and the owner can dismiss it in one transaction and keep going.
-- Inside an allowed program, value can still be lost within the limits, for example a bad swap price inside the slippage the agent asked for.
-- Each proposal holds about 0.004 SOL of rent from the agent until it is closed.
-- Very long Jupiter routes may not fit one Squads transaction.
+## Limits
+
+- The public Robinhood RPC answers `eth_call` with 429 from Cloudflare, so the worker needs a keyed RPC as `RH_RPC_URL`.
+- Inside a listed contract, value can still be lost within the limits (a bad price inside the slippage the agent chose).
+- Daily limits reset at 00:00 UTC, not on a rolling 24 hours.
 - No audit.
-
-## License
-
-MIT

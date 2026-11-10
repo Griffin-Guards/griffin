@@ -1,8 +1,7 @@
 node_modules/
-.wrangler/
-dist/
-.dev.vars
+contracts/cache/
+worker/.dev.vars
+worker/.wrangler/
+worker/dist/
+*.key
 .env
-test/.live-keys.json
-test/.live-state.json
-*.db

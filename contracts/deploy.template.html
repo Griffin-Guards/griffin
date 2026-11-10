@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deploy GriffinModule</title>
+  <style>
+    :root { --bg: #16110e; --card: #221b17; --line: rgba(244, 234, 214, .16); --text: #f4ead6; --muted: #b9ab98; --teal: #f2a531; --coral: #f08c7c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, sans-serif; }
+    .card { width: min(580px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
+    h1 { margin: 0 0 6px; font-size: 26px; }
+    p { color: var(--muted); margin: 0 0 14px; }
+    table { width: 100%; border-collapse: collapse; font: 12.5px ui-monospace, Consolas, monospace; margin: 10px 0 18px; }
+    td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+    td:first-child { color: var(--muted); width: 120px; }
+    td:last-child { overflow-wrap: anywhere; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input { width: 100%; height: 44px; padding: 0 12px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 10px; background: #071321; color: var(--text); font: 13px ui-monospace, Consolas, monospace; }
+    .hint { font-size: 12.5px; margin-bottom: 16px; }
+    button { width: 100%; height: 50px; border: 0; border-radius: 12px; background: var(--teal); color: #16110e; font: 700 16px system-ui, sans-serif; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #log { margin-top: 16px; font: 13px ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ok { color: var(--teal) !important; }
+    .err { color: var(--coral) !important; }
+    .addr { margin-top: 12px; padding: 14px; border: 1px dashed var(--teal); border-radius: 12px; font: 700 14px ui-monospace, Consolas, monospace; color: var(--teal); overflow-wrap: anywhere; }
+    a { color: var(--teal); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Deploy GriffinModule</h1>
+    <p>The GRIFFIN module for Safe on Robinhood Chain. Each Safe that enables it writes its own charter; an AI agent then spends from that Safe only inside the charter, with Griffin's signature on every move. The module has no owner and no admin: once deployed nobody can change it, and it can move nothing a Safe did not allow.</p>
+    <table>
+      <tr><td>Network</td><td>Robinhood Chain (4663)</td></tr>
+      <tr><td>Works with</td><td>Safe v1.4.1 (singleton 0x29fc…C762, factory 0x4e1D…ec67)</td></tr>
+      <tr><td>Arguments</td><td>none</td></tr>
+      <tr><td>Compiler</td><td>solc 0.8.24, viaIR, optimizer 200, evm cancun</td></tr>
+    </table>
+    <button id="go">Connect wallet &amp; deploy</button>
+    <div id="log"></div>
+  </div>
+  <script>
+    // creation bytecode (built by compile.mjs); no constructor arguments
+    const BYTECODE = '__BYTECODE__';
+    const RPC = 'https://rpc.mainnet.chain.robinhood.com';
+    const CHAIN = '0x1237';
+    const log = (t, cls) => { const el = document.getElementById('log'); el.innerHTML += `<div class="${cls || ''}">${t}</div>`; };
+    const rpc = async (method, params) => (await (await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })).json()).result;
+
+    document.getElementById('go').onclick = async () => {
+      const btn = document.getElementById('go');
+      if (!window.ethereum) { log('No wallet found. Open this page in a browser with MetaMask or Rabby.', 'err'); return; }
+      btn.disabled = true;
+      try {
+        const [from] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        log('Wallet: ' + from);
+        try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN }] }); }
+        catch (e) {
+          if (e.code !== 4902) throw e;
+          await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: CHAIN, chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [RPC], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'] }] });
+        }
+        log('Network: Robinhood Chain ✓');
+        const data = BYTECODE;
+        const hash = await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from, data }] });
+        log('Sent: <a href="https://robinhoodchain.blockscout.com/tx/' + hash + '" target="_blank" rel="noopener">' + hash + '</a>');
+        log('Waiting for confirmation…');
+        let receipt = null;
+        for (let i = 0; i < 90 && !receipt; i++) { await new Promise((r) => setTimeout(r, 2000)); receipt = await rpc('eth_getTransactionReceipt', [hash]); }
+        if (!receipt) { log('Still pending. Check the transaction link above.', 'err'); return; }
+        if (receipt.status !== '0x1') { log('The deployment failed on-chain.', 'err'); return; }
+        log('Deployed ✓', 'ok');
+        // when served by deploy-server.mjs, hand the address back so the rest of the setup can run without copy-paste
+        fetch('/deployed', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: receipt.contractAddress, tx: hash, from }) }).catch(() => {});
+        document.querySelector('.card').insertAdjacentHTML('beforeend', `<div class="addr">${receipt.contractAddress}</div><p style="margin-top:10px">Copy this address and send it over. <a href="https://robinhoodchain.blockscout.com/address/${receipt.contractAddress}" target="_blank" rel="noopener">View on Blockscout</a></p>`);
+      } catch (e) {
+        log(e.code === 4001 ? 'Cancelled in the wallet.' : 'Error: ' + (e.message || e), 'err');
+        btn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

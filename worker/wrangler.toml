@@ -1,26 +1,28 @@
-name = "griffin"
+name = "griffin-rh"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
-# Your own domain, once the zone is in your Cloudflare account:
+# Your own domain, once its zone is in your Cloudflare account:
 # routes = [{ pattern = "example.com", custom_domain = true }]
 
 [assets]
 directory = "../site"
 binding = "ASSETS"
-run_worker_first = ["/v1/*", "/v1", "/mcp", "/rpc"]
+run_worker_first = ["/v1/*", "/v1", "/mcp"]
 
-# Create with `npx wrangler d1 create griffin` and paste the database_id here.
+# Create with `npx wrangler d1 create griffin-rh` and paste the database_id here.
 [[d1_databases]]
 binding = "DB"
-database_name = "griffin"
+database_name = "griffin-rh"
 database_id = "00000000-0000-0000-0000-000000000000"
 
 [vars]
 GUARD_PER_DAY = "500"
+MODULE = "0x991948aCCf7C5d76e21c189136A0B19D7BBC7527"           # GriffinModule address once deployed
+MODULE_FROM_BLOCK = "110748909" # its deploy block, where CharterSet logs start
+LOG_SCAN = "4"            # blocks back to search for CharterSet logs (QuickNode plan: 5 per call)
 TOKEN_ADDRESS = ""
-SITE_URL = ""
 # Secrets (not here):
-#   npx wrangler secret put GRIFFIN_SECRET   (base58 secret key of Griffin's vote key)
-#   npx wrangler secret put SOL_RPC_URL      (mainnet RPC URL)
+#   npx wrangler secret put GRIFFIN_KEY   (hex private key of Griffin's signer)
+#   npx wrangler secret put RH_RPC_URL    (Robinhood Chain RPC; the public one answers eth_call with 429 from Cloudflare)

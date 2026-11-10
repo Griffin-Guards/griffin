@@ -1,283 +1,273 @@
-// GRIFFIN app: create a guarded agent wallet, sign its policy, fund it, take funds out, swap the agent key, dismiss Griffin.
+// GRIFFIN app for Robinhood Chain. Bundled by build.mjs into site/app/app.js (IIFE, viem inside).
+// Reads the chain straight from the browser; asks Griffin's API only for what it keeps (charter lists, verdicts).
+// Every owner action is an ordinary Safe transaction the owner sends (threshold 1, signature "approved by sender").
 import {
-  Connection, Keypair, PublicKey, SystemProgram, bs58, buildCreate, buildDismiss, buildPropose, buildSwapAgent,
-  compile, fmtSol, solToLamports, normalizePolicy, policyMessage, readWallet, vaultOf, multisig,
-} from '../core/griffin.mjs';
+  createPublicClient, createWalletClient, custom, http, encodeFunctionData, decodeEventLog, parseEther, parseUnits,
+  formatUnits, isAddress, getAddress, zeroAddress, pad,
+} from 'viem';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { chain, SAFE, MODULE_ABI, ERC20_ABI, readCharter, setupCalldata, fmtEth, short } from '../core/griffin-rh.mjs';
 
-const STORE = 'griffin.wallets';
-const connection = new Connection(`${location.origin}/rpc`, { commitment: 'confirmed', disableRetryOnRateLimit: true });
-const $ = (id) => document.getElementById(id);
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const short = (k) => `${String(k).slice(0, 4)}…${String(k).slice(-4)}`;
-const state = { me: null, griffin: null, open: null, view: null, busy: '', error: '', note: '' };
+const MODULE = '0x991948aCCf7C5d76e21c189136A0B19D7BBC7527';
+const FROM_BLOCK = 110748909n;
+const pub = createPublicClient({ chain, transport: http() });
+const SAFE_ABI = [
+  { type: 'function', name: 'execTransaction', stateMutability: 'payable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'uint8' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address' }, { type: 'address' }, { type: 'bytes' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'getOwners', stateMutability: 'view', inputs: [], outputs: [{ type: 'address[]' }] },
+  { type: 'function', name: 'getThreshold', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'isModuleEnabled', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'enableModule', stateMutability: 'nonpayable', inputs: [{ type: 'address' }], outputs: [] },
+  { type: 'function', name: 'disableModule', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'address' }], outputs: [] },
+  { type: 'function', name: 'getModulesPaginated', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'address[]' }, { type: 'address' }] },
+];
+const FACTORY_ABI = [
+  { type: 'function', name: 'createProxyWithNonce', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'bytes' }, { type: 'uint256' }], outputs: [{ type: 'address' }] },
+  { type: 'event', name: 'ProxyCreation', inputs: [{ type: 'address', name: 'proxy', indexed: true }, { type: 'address', name: 'singleton' }] },
+];
+const SENTINEL = '0x0000000000000000000000000000000000000001';
 
-const getProvider = () => window.phantom?.solana ?? window.solflare ?? window.solana ?? null;
-const saved = () => { try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch { return []; } };
-const remember = (a) => { try { localStorage.setItem(STORE, JSON.stringify([a, ...saved().filter((x) => x !== a)].slice(0, 8))); } catch { /* the address still works by hand */ } };
-const parseKey = (t, label) => { try { return new PublicKey(String(t).trim()); } catch { throw new Error(`${label} isn't a Solana address`); } };
-const lines = (t) => String(t || '').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+const $ = (q) => document.querySelector(q);
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const store = {
+  get: () => { try { return JSON.parse(localStorage.getItem('griffin-rh.safes') || '[]'); } catch { return []; } },
+  add(a) { try { const l = store.get().filter((x) => x.toLowerCase() !== a.toLowerCase()); l.unshift(a); localStorage.setItem('griffin-rh.safes', JSON.stringify(l.slice(0, 20))); } catch { /* private mode */ } },
+};
+const S = { account: null, wallet: null, griffin: null, safe: null, view: 'home', busy: '', err: '', note: '' };
 
 async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `Griffin answered ${r.status}`);
-  return data;
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Griffin answered ${r.status}`);
+  return j;
 }
 
-async function confirm(signature) {
-  const end = Date.now() + 90000;
-  while (Date.now() < end) {
-    const { value } = await connection.getSignatureStatuses([signature]);
-    if (value[0]?.err) throw new Error('The chain refused this transaction');
-    if (['confirmed', 'finalized'].includes(value[0]?.confirmationStatus)) return signature;
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  throw new Error(`Not confirmed yet. Check ${short(signature)} on an explorer before trying again`);
-}
-
-async function send(ixs, extra, tables = []) {
-  const provider = getProvider();
-  const { blockhash } = await connection.getLatestBlockhash();
-  const tx = compile(new PublicKey(state.me), blockhash, ixs, tables);
-  if (extra) {
-    // The wallet signs first: it may add instructions, which would void an earlier signature.
-    const signed = await provider.signTransaction(tx);
-    signed.sign([extra]);
-    return confirm(await connection.sendRawTransaction(signed.serialize()));
-  }
-  const { signature } = await provider.signAndSendTransaction(tx);
-  return confirm(signature);
-}
-
-async function run(label, fn) {
-  state.busy = label; state.error = ''; state.note = ''; render();
-  try { await fn(); } catch (e) {
-    const t = e?.message || '';
-    state.error = /reject|cancel/i.test(t) ? 'Cancelled in the wallet' : /insufficient/i.test(t) ? 'Not enough SOL in the connected wallet' : t || 'Something failed';
-  }
-  state.busy = ''; render();
-}
-
+// ---- wallet ----
 async function connect() {
-  const provider = getProvider();
-  if (!provider) { state.error = 'No Solana wallet found. Install Phantom or Solflare.'; return render(); }
-  const res = await provider.connect();
-  state.me = (res?.publicKey ?? provider.publicKey).toString();
-  render();
-}
-
-async function openWallet(address) {
-  const ms = parseKey(address, 'The wallet');
-  state.open = ms.toBase58();
-  state.view = await api(`/v1/wallet/${state.open}`);
-  state.view.lamports = await connection.getBalance(vaultOf(ms));
-  remember(state.open);
-  history.replaceState(null, '', `#${state.open}`);
-}
-
-async function create() {
-  const agentText = $('agent').value.trim();
-  if (!agentText) throw new Error('Paste the agent public key, or make one here');
-  const agent = parseKey(agentText, 'The agent key');
-  if (agent.toBase58() === state.me) throw new Error('The agent key must not be your own wallet');
-  const c = await buildCreate({ connection, owner: state.me, agent, griffin: state.griffin });
-  await send(c.ixs, c.createKey);
-  await openWallet(c.multisigPda.toBase58());
-  state.note = 'Wallet created. Sign a policy next: until then Griffin turns back every agent move.';
-}
-
-function makeAgent() {
-  const kp = Keypair.generate();
-  const blob = new Blob([JSON.stringify(Array.from(kp.secretKey))], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `griffin-agent-${kp.publicKey.toBase58().slice(0, 6)}.json`;
-  a.click();
-  $('agent').value = kp.publicKey.toBase58();
-  state.note = 'Agent key saved as a file. Move it to the agent machine and keep no other copy. This page forgets it.';
-  render();
-}
-
-async function decimalsOf(mint) {
-  const info = await connection.getAccountInfo(new PublicKey(mint));
-  if (!info || info.data.length < 45) throw new Error(`${short(mint)} is not a token mint`);
-  return info.data[44];
-}
-const toUnits = (text, d) => {
-  const [w, p = ''] = String(text).trim().split('.');
-  if (!/^\d+$/.test(w) || !/^\d*$/.test(p) || p.length > d) throw new Error(`Bad amount ${text}`);
-  return (BigInt(w) * 10n ** BigInt(d) + BigInt(p.padEnd(d, '0') || 0)).toString();
-};
-
-async function signPolicy() {
-  const tokens = {};
-  for (const row of String($('p-tokens').value).split('\n').map((r) => r.trim()).filter(Boolean)) {
-    const [mint, perTx, perDay] = row.split(/[\s,]+/);
-    if (!perDay) throw new Error('Token lines are: mint perMove perDay');
-    const d = await decimalsOf(parseKey(mint, 'A token mint').toBase58());
-    tokens[mint] = { perTx: toUnits(perTx, d), perDay: toUnits(perDay, d) };
+  if (!window.ethereum) throw new Error('No wallet found. Open this page in a browser with MetaMask, Rabby or another EVM wallet.');
+  const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+  try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1237' }] }); }
+  catch (e) {
+    if (e.code !== 4902) throw e;
+    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://rpc.mainnet.chain.robinhood.com'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'] }] });
   }
-  const policy = normalizePolicy({
-    solPerTx: solToLamports($('p-tx').value || '0').toString(),
-    solPerDay: solToLamports($('p-day').value || '0').toString(),
-    recipients: lines($('p-to').value), programs: lines($('p-prog').value), buyOnly: lines($('p-buy').value), tokens,
-  });
-  const nonce = String(Date.now());
-  const { signature } = await getProvider().signMessage(new TextEncoder().encode(policyMessage(state.open, policy, nonce)), 'utf8');
-  await api('/v1/policy', { multisig: state.open, policy, nonce, signature: bs58.encode(signature) });
-  await openWallet(state.open);
-  state.note = 'Policy signed and live.';
+  S.account = getAddress(a);
+  S.wallet = createWalletClient({ account: S.account, chain, transport: custom(window.ethereum) });
 }
+async function sendTx(to, data, value = 0n) {
+  const hash = await S.wallet.sendTransaction({ to, data, value });
+  S.busy = 'Waiting for the transaction…'; draw();
+  const r = await pub.waitForTransactionReceipt({ hash });
+  if (r.status !== 'success') throw new Error('The transaction reverted.');
+  return r;
+}
+// a Safe transaction from its only owner: signature type "approved by msg.sender"
+const ownerSafeTx = (safe, to, data, value = 0n) => sendTx(safe, encodeFunctionData({
+  abi: SAFE_ABI, functionName: 'execTransaction',
+  args: [to, value, data, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, `${pad(S.account, { size: 32 })}${'0'.repeat(64)}01`],
+}));
 
+// ---- forms ----
+const lines = (t) => String(t || '').split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
+function addresses(t, what) {
+  return lines(t).map((x) => { if (!isAddress(x)) throw new Error(`${what}: ${x} is not an address`); return getAddress(x); });
+}
+async function tokenLimits(t) {
+  const out = [];
+  for (const l of String(t || '').split('\n').map((x) => x.trim()).filter(Boolean)) {
+    const [token, perMove, perDay] = l.split(/[\s,]+/);
+    if (!isAddress(token || '') || !perMove || !perDay) throw new Error(`Token line "${l}": address, per move, per day`);
+    const decimals = await pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' }).catch(() => { throw new Error(`${token} does not answer decimals(): is it a token?`); });
+    out.push({ token: getAddress(token), perMove: parseUnits(perMove, decimals), perDay: parseUnits(perDay, decimals) });
+  }
+  return out;
+}
+async function readForm() {
+  const f = (n) => $(`[name="${n}"]`)?.value?.trim() || '';
+  if (!isAddress(f('agent'))) throw new Error('The agent address is missing or wrong.');
+  const ethPerMove = parseEther(f('perMove') || '0'), ethPerDay = parseEther(f('perDay') || '0');
+  if (ethPerMove > ethPerDay) throw new Error('ETH per move is bigger than ETH per day.');
+  return {
+    agent: getAddress(f('agent')),
+    griffin: $('[name="cosign"]').checked ? S.griffin : zeroAddress,
+    ethPerMove, ethPerDay,
+    recipients: addresses(f('recipients'), 'Recipients'),
+    tokens: await tokenLimits($('[name="tokens"]').value),
+    targets: addresses(f('targets'), 'Contracts'),
+  };
+}
+const charterArgs = (c) => [c.agent, c.griffin, c.ethPerMove, c.ethPerDay, c.recipients, c.tokens.map((t) => t.token), c.tokens.map((t) => ({ perMove: t.perMove, perDay: t.perDay })), c.targets];
+
+// ---- actions ----
+async function run(label, fn) {
+  S.err = ''; S.note = ''; S.busy = label; draw();
+  try { await fn(); } catch (e) { S.err = e.shortMessage || e.message || String(e); }
+  S.busy = ''; draw();
+}
+async function create() {
+  if (!S.account) await connect();
+  const c = await readForm();
+  const r = await sendTx(SAFE.factory, encodeFunctionData({
+    abi: FACTORY_ABI, functionName: 'createProxyWithNonce',
+    args: [SAFE.singletonL2, setupCalldata({ owner: S.account, module: MODULE, ...c }), BigInt(Date.now())],
+  }));
+  const ev = r.logs.map((l) => { try { return decodeEventLog({ abi: FACTORY_ABI, data: l.data, topics: l.topics }); } catch { return null; } }).find((e) => e?.eventName === 'ProxyCreation');
+  const safe = getAddress(ev.args.proxy);
+  store.add(safe);
+  await api('/v1/charter', { safe, tx: r.transactionHash }).catch(() => {});
+  S.note = `Safe ${short(safe)} is made, the module is on and the charter is written. Fund it next.`;
+  await open(safe);
+}
+async function saveCharter() {
+  const c = await readForm();
+  const r = await ownerSafeTx(S.safe.address, MODULE, encodeFunctionData({ abi: MODULE_ABI, functionName: 'setCharter', args: charterArgs(c) }));
+  await api('/v1/charter', { safe: S.safe.address, tx: r.transactionHash }).catch(() => {});
+  S.note = 'New charter written. The old lists no longer count.';
+  await open(S.safe.address);
+}
 async function fund() {
-  const lamports = solToLamports($('f-amt').value);
-  await send([SystemProgram.transfer({ fromPubkey: new PublicKey(state.me), toPubkey: vaultOf(state.open), lamports })]);
-  await openWallet(state.open);
-  state.note = `Sent ${fmtSol(lamports)} SOL to the vault.`;
+  const v = parseEther($('[name="fund"]').value.trim() || '0');
+  if (v <= 0n) throw new Error('How much ETH?');
+  await sendTx(S.safe.address, '0x', v);
+  S.note = `${fmtEth(v)} ETH sent to the Safe.`;
+  await open(S.safe.address);
 }
-
-// Owner moves still need two votes: the owner proposes, Griffin votes (always yes for the owner), the owner executes.
 async function withdraw() {
-  const to = parseKey($('w-to').value || state.me, 'The destination');
-  const lamports = solToLamports($('w-amt').value);
-  const ms = new PublicKey(state.open);
-  const { index, ixs } = await buildPropose({ connection, multisigPda: ms, member: new PublicKey(state.me), ixs: [SystemProgram.transfer({ fromPubkey: vaultOf(ms), toPubkey: to, lamports })], memo: 'GRIFFIN owner withdrawal' });
-  await send(ixs);
-  const v = await api('/v1/guard', { multisig: state.open, index: Number(index), submit: true });
-  if (v.verdict !== 'passed') throw new Error(`Griffin turned it back: ${v.reasons.join('; ')}`);
-  await confirm(v.voteSignature);
-  const { instruction, lookupTableAccounts } = await multisig.instructions.vaultTransactionExecute({ connection, multisigPda: ms, transactionIndex: index, member: new PublicKey(state.me) });
-  await send([instruction, multisig.instructions.vaultTransactionAccountsClose({ multisigPda: ms, transactionIndex: index, rentCollector: vaultOf(ms) })], null, lookupTableAccounts);
-  await openWallet(state.open);
-  state.note = `${fmtSol(lamports)} SOL sent to ${short(to)}.`;
+  const v = parseEther($('[name="withdraw"]').value.trim() || '0');
+  if (v <= 0n) throw new Error('How much ETH?');
+  await ownerSafeTx(S.safe.address, S.account, '0x', v);
+  S.note = `${fmtEth(v)} ETH back to your wallet. Your own moves need no one's signature.`;
+  await open(S.safe.address);
+}
+async function setAgent() {
+  const a = $('[name="newAgent"]').value.trim();
+  if (!isAddress(a)) throw new Error('New agent address?');
+  await ownerSafeTx(S.safe.address, MODULE, encodeFunctionData({ abi: MODULE_ABI, functionName: 'setAgent', args: [getAddress(a)] }));
+  S.note = 'Agent key swapped. The old key can do nothing now.';
+  await open(S.safe.address);
+}
+async function setGriffin(on) {
+  await ownerSafeTx(S.safe.address, MODULE, encodeFunctionData({ abi: MODULE_ABI, functionName: 'setGriffin', args: [on ? S.griffin : zeroAddress] }));
+  S.note = on ? 'Griffin co-signs again.' : 'Griffin is out. The on-chain charter alone decides now.';
+  await open(S.safe.address);
+}
+async function setModule(on) {
+  if (on) await ownerSafeTx(S.safe.address, S.safe.address, encodeFunctionData({ abi: SAFE_ABI, functionName: 'enableModule', args: [MODULE] }));
+  else {
+    const [mods] = await pub.readContract({ address: S.safe.address, abi: SAFE_ABI, functionName: 'getModulesPaginated', args: [SENTINEL, 50n] });
+    const i = mods.findIndex((m) => m.toLowerCase() === MODULE.toLowerCase());
+    const prev = i <= 0 ? SENTINEL : mods[i - 1];
+    await ownerSafeTx(S.safe.address, S.safe.address, encodeFunctionData({ abi: SAFE_ABI, functionName: 'disableModule', args: [prev, MODULE] }));
+  }
+  S.note = on ? 'Module enabled: the agent can move inside the charter.' : 'Module disabled: the agent can move nothing.';
+  await open(S.safe.address);
+}
+function agentKey() {
+  const key = generatePrivateKey();
+  const address = privateKeyToAccount(key).address;
+  const blob = new Blob([`${key}\n`], { type: 'text/plain' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `griffin-agent-${address.slice(2, 8)}.key` });
+  a.click();
+  $('[name="agent"]').value = address;
+  S.note = `Agent key saved as ${a.download}. Put it on the agent's machine; it never leaves your browser otherwise.`;
+  draw(true);
+}
+async function open(address) {
+  const safe = getAddress(address);
+  const known = await api(`/v1/charter/${safe}`).then((r) => r.known).catch(() => null);
+  const [charter, balance, owners, threshold, verdicts] = await Promise.all([
+    readCharter(pub, MODULE, safe, { known, fromBlock: FROM_BLOCK }),
+    pub.getBalance({ address: safe }),
+    pub.readContract({ address: safe, abi: SAFE_ABI, functionName: 'getOwners' }).catch(() => []),
+    pub.readContract({ address: safe, abi: SAFE_ABI, functionName: 'getThreshold' }).catch(() => 0n),
+    api(`/v1/verdicts/${safe}`).then((r) => r.verdicts).catch(() => []),
+  ]);
+  if (!owners.length) throw new Error('No Safe at that address on Robinhood Chain.');
+  const tokens = await Promise.all(charter.tokens.map(async (t) => {
+    const [symbol, decimals, bal] = await Promise.all([
+      pub.readContract({ address: t.token, abi: ERC20_ABI, functionName: 'symbol' }).catch(() => short(t.token)),
+      pub.readContract({ address: t.token, abi: ERC20_ABI, functionName: 'decimals' }).catch(() => 18),
+      pub.readContract({ address: t.token, abi: ERC20_ABI, functionName: 'balanceOf', args: [safe] }).catch(() => 0n),
+    ]);
+    return { ...t, symbol, decimals, bal };
+  }));
+  store.add(safe);
+  S.safe = { address: safe, charter, balance, owners, threshold, verdicts, tokens };
+  S.view = 'safe';
 }
 
-async function swapAgent() {
-  const next = parseKey($('s-new').value, 'The new agent key');
-  const old = state.view.members.find((m) => m.role === 'full' && m.key !== state.view.configAuthority);
-  if (!old) throw new Error('No agent key on this wallet');
-  await send(buildSwapAgent({ multisigPda: state.open, owner: state.me, oldAgent: old.key, newAgent: next }));
-  await openWallet(state.open);
-  state.note = `Agent key is now ${short(next)}. Open moves from the old key are void.`;
-}
+// ---- view ----
+const ownerOf = () => S.account && S.safe?.owners.some((o) => o.toLowerCase() === S.account.toLowerCase());
+const charterForm = (c) => `
+  <label>Agent address <input name="agent" value="${esc(c?.agent && c.agent !== zeroAddress ? c.agent : '')}" placeholder="0x… the key your agent signs with" spellcheck="false"></label>
+  ${S.safe ? '' : '<button class="ghost" data-do="agentKey" type="button">Make an agent key here</button>'}
+  <div class="two"><label>ETH per move <input name="perMove" value="${c ? fmtEth(c.ethPerMove) : '0.05'}"></label><label>ETH per day <input name="perDay" value="${c ? fmtEth(c.ethPerDay) : '0.2'}"></label></div>
+  <label>Recipients <span>one address per line; ETH and token transfers only reach these</span><textarea name="recipients" rows="3" spellcheck="false">${esc((c?.recipients || []).join('\n'))}</textarea></label>
+  <label>Tokens <span>one per line: token address, per move, per day (whole tokens)</span><textarea name="tokens" rows="3" spellcheck="false">${esc((S.safe?.tokens || []).map((t) => `${t.token} ${formatUnits(t.perMove, t.decimals)} ${formatUnits(t.perDay, t.decimals)}`).join('\n'))}</textarea></label>
+  <label>Contracts <span>the agent may call these and approve them to spend listed tokens (a DEX router, for example)</span><textarea name="targets" rows="2" spellcheck="false">${esc((c?.targets || []).join('\n'))}</textarea></label>
+  <label class="check"><input type="checkbox" name="cosign" ${!c || c.griffin !== zeroAddress ? 'checked' : ''}> Griffin simulates and co-signs every move</label>`;
 
-async function dismiss() {
-  if (!window.confirm('Remove Griffin and drop the wallet to 1 vote? Your agent key could then move funds alone. Do this only to take your funds out.')) return;
-  await send(buildDismiss({ multisigPda: state.open, owner: state.me, griffin: state.griffin }));
-  await openWallet(state.open);
-  state.note = 'Griffin is off this wallet. Move your funds out with the Squads app or the agent key before you hand the agent this wallet again.';
+function homeView() {
+  const saved = store.get();
+  return `<div class="card"><h2>Make an agent Safe</h2>
+    <p class="muted">One transaction makes a Safe with you as its only owner, enables GriffinModule and writes the charter. Gas only.</p>
+    ${charterForm(null)}
+    <button class="gold" data-do="create">${S.account ? 'Make the Safe' : 'Connect wallet & make the Safe'}</button></div>
+    <div class="card"><h2>Open a Safe</h2>
+    <div class="row"><input name="openAddr" placeholder="0x… Safe address" spellcheck="false"><button data-do="open">Open</button></div>
+    ${saved.length ? `<ul class="saved">${saved.map((a) => `<li><a href="#${a}">${a}</a></li>`).join('')}</ul>` : ''}</div>`;
 }
-
-function verdictRows(list) {
-  if (!list.length) return '<p class="muted">No moves judged yet.</p>';
-  return `<table class="verdicts"><tbody>${list.map((v) => `<tr class="${v.verdict === 'passed' ? 'ok' : 'no'}"><td class="mono">#${v.index}</td><td><b>${v.verdict.toUpperCase()}</b><div class="muted">${esc(v.reasons.join(' · '))}</div></td><td class="mono">${v.solOut !== '0' ? `${fmtSol(v.solOut)} SOL` : ''}</td><td class="mono muted">${new Date(v.at).toLocaleString()}</td></tr>`).join('')}</tbody></table>`;
-}
-
-function walletPanel() {
-  const v = state.view;
-  const isOwner = state.me && v.configAuthority === state.me;
-  const p = v.policy?.policy;
-  const role = (m) => (m.key === v.griffin ? 'Griffin' : m.key === v.configAuthority ? 'Owner' : m.role === 'full' ? 'Agent' : m.role);
-  const fmtTok = (t) => Object.entries(t || {}).map(([m, l]) => `${m} ${l.perTx} ${l.perDay}`).join('\n');
-  return `
-  <div class="card">
-    <div class="row between"><h2>Wallet ${short(v.multisig)}</h2><button data-act="refresh" class="ghost">Refresh</button></div>
-    ${v.problem ? `<p class="warn">Not guarded: ${esc(v.problem)}</p>` : '<p class="okline">Guarded by Griffin · 2 votes needed · no wait</p>'}
+function safeView() {
+  const s = S.safe, c = s.charter, own = ownerOf();
+  const status = !c.enabled ? '<b class="no">module off</b>' : c.version === 0n ? '<b class="no">no charter</b>' : c.griffin === zeroAddress ? '<b>charter only, no co-signer</b>' : '<b class="ok">guarded</b>';
+  return `<div class="card"><div class="between"><h2>Safe ${short(s.address)}</h2>${status}</div>
     <dl class="facts">
-      <dt>Squads wallet</dt><dd class="mono">${v.multisig}</dd>
-      <dt>Vault (send funds here)</dt><dd class="mono">${v.vault}</dd>
-      <dt>Vault balance</dt><dd>${fmtSol(v.lamports)} SOL</dd>
-      <dt>Spent in 24h</dt><dd>${fmtSol(v.spent24h || 0)} SOL</dd>
-      ${v.members.map((m) => `<dt>${role(m)}</dt><dd class="mono">${m.key}</dd>`).join('')}
-    </dl>
-  </div>
-  <div class="card">
-    <h2>Policy ${v.policy ? `<span class="mono muted small">${v.policy.hash.slice(0, 12)}</span>` : ''}</h2>
-    ${p ? '' : '<p class="warn">No policy yet. Every agent move is turned back.</p>'}
-    ${isOwner ? `
-    <div class="grid2">
-      <label>SOL per move<input id="p-tx" value="${p ? fmtSol(p.solPerTx) : '0.1'}"></label>
-      <label>SOL per 24h<input id="p-day" value="${p ? fmtSol(p.solPerDay) : '0.5'}"></label>
-    </div>
-    <label>Recipients the agent may pay (one per line)<textarea id="p-to" rows="3">${esc((p?.recipients || []).join('\n'))}</textarea></label>
-    <label>Extra programs, by address (System, token, ATA, memo, Jupiter are in already)<textarea id="p-prog" rows="2">${esc((p?.programs || []).join('\n'))}</textarea></label>
-    <label>Buy list: only these tokens may come in (empty = any)<textarea id="p-buy" rows="2">${esc((p?.buyOnly || []).join('\n'))}</textarea></label>
-    <label>Token limits: <span class="mono">mint perMove perDay</span> in whole tokens, one per line<textarea id="p-tokens" rows="2" placeholder="EPjFWdd5AufqSSqeM2qq1xzybapC8G4wGGkEZwyTDt1v 20 50"></textarea></label>
-    ${p && Object.keys(p.tokens).length ? `<p class="muted small">Current token limits in base units:<br><span class="mono">${esc(fmtTok(p.tokens)).replace(/\n/g, '<br>')}</span><br>Signing a new policy replaces them, so list them again.</p>` : ''}
-    <button data-act="policy" class="gold">Sign policy</button>` : `<pre class="policy">${esc(JSON.stringify(p, null, 2))}</pre><p class="muted">Connect the owner wallet to change it.</p>`}
-  </div>
-  ${isOwner ? `
-  <div class="card">
-    <h2>Funds</h2>
-    <div class="grid2">
-      <div><label>Add SOL to the vault<input id="f-amt" placeholder="0.5"></label><button data-act="fund">Send to vault</button></div>
-      <div><label>Take SOL out<input id="w-amt" placeholder="0.5"></label><label>To (empty = you)<input id="w-to" placeholder="${state.me}"></label><button data-act="withdraw">Withdraw</button></div>
-    </div>
-    <p class="muted small">A withdrawal takes two wallet popups: propose, then execute after Griffin's vote. About 0.004 SOL rent goes back to the vault.</p>
-  </div>
-  <div class="card">
-    <h2>Keys</h2>
-    <label>Swap the agent key (one popup, no vote)<input id="s-new" placeholder="new agent public key"></label>
-    <button data-act="swap">Swap agent key</button>
-    <hr>
-    <p class="muted small">If Griffin is ever down, you can remove it and drop the wallet to one vote. Only for taking your funds out.</p>
-    <button data-act="dismiss" class="danger">Dismiss Griffin</button>
-  </div>` : ''}
-  <div class="card"><h2>Verdicts</h2>${verdictRows(v.verdicts)}</div>`;
+      <dt>Address</dt><dd class="mono"><a href="https://robinhoodchain.blockscout.com/address/${s.address}" target="_blank" rel="noopener">${s.address}</a></dd>
+      <dt>Balance</dt><dd>${fmtEth(s.balance)} ETH${s.tokens.map((t) => ` · ${formatUnits(t.bal, t.decimals)} ${esc(t.symbol)}`).join('')}</dd>
+      <dt>Owners</dt><dd class="mono">${s.owners.map(short).join(', ')} · ${s.threshold} to sign</dd>
+      <dt>Agent</dt><dd class="mono">${c.agent === zeroAddress ? '—' : c.agent}</dd>
+      <dt>Co-signer</dt><dd class="mono">${c.griffin === zeroAddress ? 'none' : c.griffin}${S.griffin && c.griffin.toLowerCase() === S.griffin.toLowerCase() ? ' (Griffin)' : ''}</dd>
+      <dt>ETH</dt><dd>${fmtEth(c.ethPerMove)} per move · ${fmtEth(c.ethPerDay)} per day · ${fmtEth(c.spentEth)} spent today</dd>
+      <dt>Recipients</dt><dd class="mono">${c.listsKnown ? (c.recipients.map(short).join(', ') || 'none') : 'unknown to this browser'}</dd>
+      <dt>Tokens</dt><dd>${s.tokens.map((t) => `${esc(t.symbol)} ${formatUnits(t.perMove, t.decimals)} / ${formatUnits(t.perDay, t.decimals)}, ${formatUnits(t.spent, t.decimals)} today`).join(' · ') || 'none'}</dd>
+      <dt>Contracts</dt><dd class="mono">${c.targets.map(short).join(', ') || 'none'}</dd>
+    </dl></div>
+    <div class="card"><h2>Fund</h2><div class="row"><input name="fund" placeholder="ETH"><button data-do="fund">Send to the Safe</button></div></div>
+    ${own ? `<div class="card"><h2>Your moves</h2><p class="muted">You are the owner: these are plain Safe transactions, no Griffin, no limits.</p>
+      <div class="row"><input name="withdraw" placeholder="ETH"><button data-do="withdraw">Withdraw to my wallet</button></div>
+      <div class="row"><input name="newAgent" placeholder="0x… new agent key" spellcheck="false"><button data-do="setAgent">Swap the agent</button></div>
+      <div class="row">${c.griffin === zeroAddress ? '<button data-do="griffinOn">Bring Griffin back</button>' : '<button data-do="griffinOff">Remove Griffin</button>'}
+      ${c.enabled ? '<button class="danger" data-do="moduleOff">Disable the module</button>' : '<button data-do="moduleOn">Enable the module</button>'}</div></div>
+    <div class="card"><h2>Charter</h2><p class="muted">Writing a new charter replaces the whole one.</p>${charterForm(c)}<button class="gold" data-do="saveCharter">Write the charter</button></div>`
+    : `<div class="card"><p class="muted">${S.account ? 'This wallet is not an owner of the Safe.' : 'Connect the owner wallet to change anything.'}</p>${S.account ? '' : '<button data-do="connect">Connect wallet</button>'}</div>`}
+    <div class="card"><h2>Verdicts</h2>${s.verdicts.length ? `<table class="ledger">${s.verdicts.map((v) => `<tr><td>#${v.nonce}</td><td class="${v.verdict === 'passed' ? 'ok' : 'no'}">${v.verdict === 'passed' ? 'SIGNED' : 'REFUSED'}</td><td>${v.value !== '0' ? `${fmtEth(v.value)} ETH → ` : ''}${short(v.to)}</td><td>${esc(v.reasons[0] || '')}</td></tr>`).join('')}</table>` : '<p class="muted">No moves asked yet.</p>'}</div>
+    <button class="ghost" data-do="home">← All Safes</button>`;
 }
-
-function render() {
-  const s = saved();
-  $('root').innerHTML = `
-  <aside>
-    <div class="who">${state.me ? `<span class="mono">${short(state.me)}</span>` : '<button data-act="connect" class="gold">Connect wallet</button>'}</div>
-    <button data-act="new" class="side ${state.open ? '' : 'on'}">+ New guarded wallet</button>
-    <div class="ring">${s.map((a) => `<button data-open="${a}" class="side ${state.open === a ? 'on' : ''} mono">${short(a)}</button>`).join('')}</div>
-    <label class="small">Open by address<input id="open-addr" placeholder="Squads wallet"></label>
-    <button data-act="open">Open</button>
-  </aside>
-  <main>
-    ${state.busy ? `<div class="busy">${esc(state.busy)}…</div>` : ''}
-    ${state.error ? `<div class="err">${esc(state.error)}</div>` : ''}
-    ${state.note ? `<div class="note">${esc(state.note)}</div>` : ''}
-    ${state.open && state.view ? walletPanel() : `
-    <div class="card">
-      <h2>New guarded wallet</h2>
-      <p class="muted">You become the owner. The agent gets one vote, Griffin gets one, and every move needs two. Costs about 0.003 SOL in rent plus a small Squads fee if any.</p>
-      <label>Agent public key<input id="agent" placeholder="the key your bot signs with"></label>
-      <div class="row"><button data-act="make" class="ghost">Make an agent key here</button><button data-act="create" class="gold" ${state.me ? '' : 'disabled'}>Create wallet</button></div>
-      <p class="muted small">Griffin key: <span class="mono">${state.griffin || '…'}</span></p>
-    </div>`}
-  </main>`;
+function draw(keepForm) {
+  if (keepForm) { $('.msg').innerHTML = msgs(); return; }
+  $('#who').innerHTML = S.account ? `<span class="mono">${short(S.account)}</span>` : '<button data-do="connect">Connect wallet</button>';
+  $('#main').innerHTML = `<div class="msg">${msgs()}</div>${S.view === 'safe' && S.safe ? safeView() : homeView()}`;
 }
+const msgs = () => `${S.busy ? `<div class="busy">${esc(S.busy)}</div>` : ''}${S.err ? `<div class="err">${esc(S.err)}</div>` : ''}${S.note ? `<div class="note">${esc(S.note)}</div>` : ''}`;
 
 document.addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  const act = b.dataset.act;
-  if (b.dataset.open) return run('Opening', () => openWallet(b.dataset.open));
-  if (act === 'connect') return run('Connecting', connect);
-  if (act === 'new') { state.open = null; state.view = null; history.replaceState(null, '', location.pathname); return render(); }
-  if (act === 'open') return run('Opening', () => openWallet($('open-addr').value));
-  if (act === 'refresh') return run('Reading', () => openWallet(state.open));
-  if (act === 'make') return makeAgent();
-  const needMe = (fn) => async () => { if (!state.me) await connect(); return fn(); };
-  if (act === 'create') return run('Creating the wallet', needMe(create));
-  if (act === 'policy') return run('Signing the policy', needMe(signPolicy));
-  if (act === 'fund') return run('Funding', needMe(fund));
-  if (act === 'withdraw') return run('Withdrawing', needMe(withdraw));
-  if (act === 'swap') return run('Swapping the agent key', needMe(swapAgent));
-  if (act === 'dismiss') return run('Dismissing Griffin', needMe(dismiss));
+  const b = e.target.closest('[data-do]');
+  if (!b || S.busy) return;
+  const d = b.dataset.do;
+  if (d === 'agentKey') return agentKey();
+  if (d === 'home') { S.view = 'home'; S.safe = null; history.replaceState(null, '', '#'); return draw(); }
+  const acts = {
+    connect: ['Connecting…', connect], create: ['Making the Safe…', create], saveCharter: ['Writing the charter…', saveCharter],
+    fund: ['Sending…', fund], withdraw: ['Withdrawing…', withdraw], setAgent: ['Swapping the agent…', setAgent],
+    griffinOn: ['Updating…', () => setGriffin(true)], griffinOff: ['Removing Griffin…', () => setGriffin(false)],
+    moduleOn: ['Enabling…', () => setModule(true)], moduleOff: ['Disabling…', () => setModule(false)],
+    open: ['Reading the Safe…', async () => { const a = $('[name="openAddr"]').value.trim(); if (!isAddress(a)) throw new Error('That is not an address.'); await open(a); history.replaceState(null, '', `#${getAddress(a)}`); }],
+  };
+  if (d === 'moduleOff' && !confirm('Disable GriffinModule on this Safe? The agent will not be able to move anything until you enable it again.')) return;
+  if (acts[d]) run(...acts[d]);
 });
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (isAddress(h)) run('Reading the Safe…', () => open(h)); });
 
-(async () => {
-  render();
-  try { state.griffin = (await api('/v1/griffin')).griffin; } catch { state.error = 'Griffin is not answering right now'; }
-  const provider = getProvider();
-  try { const r = await provider?.connect({ onlyIfTrusted: true }); if (r?.publicKey) state.me = r.publicKey.toString(); } catch { /* not trusted yet */ }
-  const hash = location.hash.slice(1);
-  if (hash) await run('Opening', () => openWallet(hash));
-  else render();
-})();
-
-void readWallet;
+api('/v1/griffin').then((g) => { S.griffin = getAddress(g.griffin); }).catch(() => { S.err = 'Griffin\'s API did not answer; co-signing is unavailable right now.'; draw(); });
+draw();
+const h = location.hash.slice(1);
+if (isAddress(h)) run('Reading the Safe…', () => open(h));

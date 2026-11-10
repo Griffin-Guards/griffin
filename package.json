@@ -2,13 +2,16 @@
   "name": "griffin",
   "private": true,
   "type": "module",
-  "description": "Policy co-signer for AI agent wallets on Solana. Your agent holds one key. Griffin holds the other.",
+  "description": "A Safe for your AI agent on Robinhood Chain: the charter lives in GriffinModule, Griffin co-signs every move.",
   "scripts": {
-    "setup": "cd core && npm install",
-    "test": "node core/test.mjs",
-    "build": "node core/build.mjs && node site-src/pages.mjs",
-    "dev": "node --disable-warning=ExperimentalWarning worker/dev.mjs 8833",
+    "compile": "cd contracts && node compile.mjs",
+    "fork": "cd contracts && npx hardhat node --config hardhat.config.cjs --port 8547",
+    "test": "cd contracts && node test.mjs && cd .. && node test/e2e.mjs",
+    "build": "node app-src/build.mjs",
+    "dev": "node worker/dev.mjs 8834",
     "deploy": "cd worker && npx wrangler deploy",
     "agent": "node agent/cli.mjs"
-  }
+  },
+  "dependencies": { "viem": "2.21.0" },
+  "devDependencies": { "esbuild": "^0.28.2", "hardhat": "^2.22.0", "sharp": "^0.33.0", "solc": "0.8.24", "wrangler": "^4" }
 }
